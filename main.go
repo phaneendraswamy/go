@@ -1,6 +1,5 @@
 package main
 
-// [Your existing imports and code remain unchanged]
 import (
 	"compress/gzip"
 	"crypto/sha256"
@@ -16,7 +15,6 @@ import (
 	"sync"
 )
 
-// [Your existing variables and structs remain unchanged]
 var codesToKeep = []string{
 	"81416", "81552", "81519", "81521", "81522", "81541", "81518", "81542",
 	"0045U", "0047U", "81540", "0172U", "81546", "0080U", "0037U", "81595",
@@ -427,7 +425,7 @@ var htmlTemplate = `
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title> MRF VIEWER </title>
+    <title>MRF VIEWER</title>
     <style>
         #loading-overlay {
             display: none;
@@ -473,7 +471,7 @@ var htmlTemplate = `
 </head>
 <body>
     <div class="container" style="max-width: 1200px; margin: 0 auto; position: relative;">
-        <h1 style="font-family: Arial, sans-serif;">MRF VIEWER </h1>
+        <h1 style="font-family: Arial, sans-serif;">MRF VIEWER</h1>
         <form id="url-form">
             <input type="text" id="url-input" placeholder="Enter URL" required style="width: 60%; padding: 8px; margin-right: 10px; font-family: Arial, sans-serif;">
             <button type="submit" id="process-btn" style="padding: 8px 16px; background-color: #4CAF50; color: white; border: none; cursor: pointer; font-family: Arial, sans-serif;">Process</button>
@@ -799,7 +797,10 @@ var htmlTemplate = `
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ url })
                 });
-                if (!response.ok) throw new Error('Network response was not ok');
+                if (!response.ok) {
+                    const errorData = await response.text();
+                    throw new Error(errorData || 'Network response was not ok');
+                }
                 const result = await response.json();
                 allData = result.data;
                 displayTable(allData, 1);
@@ -820,58 +821,58 @@ var htmlTemplate = `
 `
 
 func main() {
-    http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-        tmpl, err := template.New("index").Parse(htmlTemplate)
-        if err != nil {
-            http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-            log.Printf("Template parsing error: %v", err)
-            return
-        }
-        if err := tmpl.Execute(w, nil); err != nil {
-            http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-            log.Printf("Template execution error: %v", err)
-        }
-    })
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		tmpl, err := template.New("index").Parse(htmlTemplate)
+		if err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			log.Printf("Template parsing error: %v", err)
+			return
+		}
+		if err := tmpl.Execute(w, nil); err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			log.Printf("Template execution error: %v", err)
+		}
+	})
 
-    http.HandleFunc("/api/process", func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != http.MethodPost {
-            http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
+	http.HandleFunc("/api/process", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 
-        var req struct {
-            URL string `json:"url"`
-        }
-        if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.URL == "" {
-            http.Error(w, "Bad Request: URL is required", http.StatusBadRequest)
-            return
-        }
+		var req struct {
+			URL string `json:"url"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.URL == "" {
+			http.Error(w, "Bad Request: URL is required", http.StatusBadRequest)
+			return
+		}
 
-        results, err := process(req.URL)
-        if err != nil {
-            http.Error(w, fmt.Sprintf("Error processing URL: %v", err), http.StatusInternalServerError)
-            return
-        }
+		results, err := process(req.URL)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error processing URL: %v", err), http.StatusInternalServerError)
+			return
+		}
 
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(struct {
-            Data    []map[string]interface{} `json:"data"`
-            Total   int                      `json:"total"`
-            Message string                   `json:"message"`
-        }{
-            Data:    results,
-            Total:   len(results),
-            Message: fmt.Sprintf("Displaying up to 100 entries per billing code, total %d entries", len(results)),
-        })
-    })
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(struct {
+			Data    []map[string]interface{} `json:"data"`
+			Total   int                      `json:"total"`
+			Message string                   `json:"message"`
+		}{
+			Data:    results,
+			Total:   len(results),
+			Message: fmt.Sprintf("Displaying up to 100 entries per billing code, total %d entries", len(results)),
+		})
+	})
 
-    // Updated to use the PORT environment variable for Render
-    port := os.Getenv("PORT")
-    if port == "" {
-        port = "8080" // Default for local testing
-    }
-    log.Println("Server starting on :" + port)
-    if err := http.ListenAndServe(":"+port, nil); err != nil {
-        log.Fatalf("Server failed: %v", err)
-    }
+	// Use the PORT environment variable for Render
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080" // Default for local testing
+	}
+	log.Println("Server starting on :" + port)
+	if err := http.ListenAndServe(":"+port, nil); err != nil {
+		log.Fatalf("Server failed: %v", err)
+	}
 }
