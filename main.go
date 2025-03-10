@@ -7,10 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
-	"io"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 )
@@ -86,38 +84,47 @@ func createHashID(value string) string {
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
-func downloadFile(url, outputPath string) error {
-	resp, err := http.Get(url)
-	if err != nil {
-		return fmt.Errorf("failed to download file: %w", err)
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("bad status: %s", resp.Status)
-	}
-	file, err := os.Create(outputPath)
-	if err != nil {
-		return fmt.Errorf("failed to create file: %w", err)
-	}
-	defer file.Close()
-	_, err = io.Copy(file, resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to write file: %w", err)
-	}
-	return nil
+	return false
 }
 
-func readGzFile(fileName string) (*gzip.Reader, error) {
-	file, err := os.Open(fileName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %w", err)
+func worker(id int, jobs <-chan interface{}, results chan<- []map[string]interface{}, wg *sync.WaitGroup, root RootData, providerReferences []interface{}, isCentene bool) {
+	defer wg.Done()
+	for job := range jobs {
+		var standardizedData []map[string]interface{}
+		var err error
+
+		if isCentene {
+			inNetworkBytes, _ := json.Marshal(job)
+			var inNetwork InNetwork
+			if err := json.Unmarshal(inNetworkBytes, &inNetwork); err != nil {
+				log.Printf("Worker %d: Error converting to InNetwork: %v", id, err)
+				continue
+			}
+			standardizedData, err = standardizeToCentene(inNetwork, root)
+		} else {
+			inNetworkMap, ok := job.(map[string]interface{})
+			if !ok {
+				log.Printf("Worker %d: Error: job is not a map[string]interface{}", id)
+				continue
+			}
+			rootHashID := createHashID(root.ReportingEntityName + root.ReportingEntityType + root.LastUpdatedOn)
+			standardizedData, err = standardizeToAetna(inNetworkMap, rootHashID, root.ReportingEntityName, root.ReportingEntityType, root.LastUpdatedOn, root.Version, providerReferences)
+		}
+
+		if err != nil {
+			log.Printf("Worker %d: Error: %v", id, err)
+			continue
+		}
+		if len(standardizedData) > 0 {
+			results <- standardizedData
+		}
 	}
-	gzReader, err := gzip.NewReader(file)
-	if err != nil {
-		file.Close()
-		return nil, fmt.Errorf("failed to create gzip reader: %w", err)
-	}
-	return gzReader, nil
 }
 
 func standardizeToAetna(inNetworkMap map[string]interface{}, rootHashID, root, rootType, lastUpdated, version string, providerReferences []interface{}) ([]map[string]interface{}, error) {
@@ -307,57 +314,18 @@ func standardizeToCentene(inNetwork InNetwork, root RootData) ([]map[string]inte
 	return standardizedData, nil
 }
 
-func worker(id int, jobs <-chan interface{}, results chan<- []map[string]interface{}, wg *sync.WaitGroup, root RootData, providerReferences []interface{}, isCentene bool) {
-	defer wg.Done()
-	for job := range jobs {
-		var standardizedData []map[string]interface{}
-		var err error
-
-		if isCentene {
-			inNetworkBytes, _ := json.Marshal(job)
-			var inNetwork InNetwork
-			if err := json.Unmarshal(inNetworkBytes, &inNetwork); err != nil {
-				log.Printf("Worker %d: Error converting to InNetwork: %v", id, err)
-				continue
-			}
-			standardizedData, err = standardizeToCentene(inNetwork, root)
-		} else {
-			inNetworkMap, ok := job.(map[string]interface{})
-			if !ok {
-				log.Printf("Worker %d: Error: job is not a map[string]interface{}", id)
-				continue
-			}
-			rootHashID := createHashID(root.ReportingEntityName + root.ReportingEntityType + root.LastUpdatedOn)
-			standardizedData, err = standardizeToAetna(inNetworkMap, rootHashID, root.ReportingEntityName, root.ReportingEntityType, root.LastUpdatedOn, root.Version, providerReferences)
-		}
-
-		if err != nil {
-			log.Printf("Worker %d: Error: %v", id, err)
-			continue
-		}
-		if len(standardizedData) > 0 {
-			results <- standardizedData
-		}
-	}
-}
-
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
-}
-
 func process(url string) ([]map[string]interface{}, error) {
-	downloadedFile := "temp_downloaded_file.json.gz"
-	if err := downloadFile(url, downloadedFile); err != nil {
+	resp, err := http.Get(url)
+	if err != nil {
 		return nil, fmt.Errorf("error downloading file: %v", err)
 	}
-	defer os.Remove(downloadedFile)
+	defer resp.Body.Close()
 
-	gzReader, err := readGzFile(downloadedFile)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("bad status: %s", resp.Status)
+	}
+
+	gzReader, err := gzip.NewReader(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("error decompressing file: %v", err)
 	}
@@ -425,7 +393,7 @@ var htmlTemplate = `
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MRF VIEWER</title>
+    <title> MRF VIEWER </title>
     <style>
         #loading-overlay {
             display: none;
@@ -471,7 +439,7 @@ var htmlTemplate = `
 </head>
 <body>
     <div class="container" style="max-width: 1200px; margin: 0 auto; position: relative;">
-        <h1 style="font-family: Arial, sans-serif;">MRF VIEWER</h1>
+        <h1 style="font-family: Arial, sans-serif;">MRF VIEWER </h1>
         <form id="url-form">
             <input type="text" id="url-input" placeholder="Enter URL" required style="width: 60%; padding: 8px; margin-right: 10px; font-family: Arial, sans-serif;">
             <button type="submit" id="process-btn" style="padding: 8px 16px; background-color: #4CAF50; color: white; border: none; cursor: pointer; font-family: Arial, sans-serif;">Process</button>
@@ -797,10 +765,7 @@ var htmlTemplate = `
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ url })
                 });
-                if (!response.ok) {
-                    const errorData = await response.text();
-                    throw new Error(errorData || 'Network response was not ok');
-                }
+                if (!response.ok) throw new Error('Network response was not ok');
                 const result = await response.json();
                 allData = result.data;
                 displayTable(allData, 1);
@@ -821,19 +786,6 @@ var htmlTemplate = `
 `
 
 func main() {
-	// Get PORT from environment, default to 8080 if not set
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080" // Default for local testing
-		log.Println("Warning: PORT environment variable not set, using default :8080")
-	} else {
-		log.Println("Using PORT from environment: " + port)
-	}
-
-	// Log all environment variables for debugging
-	log.Println("Environment variables:", os.Environ())
-
-	// Set up HTTP handlers
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		tmpl, err := template.New("index").Parse(htmlTemplate)
 		if err != nil {
@@ -879,15 +831,10 @@ func main() {
 		})
 	})
 
-	// Add a health check endpoint
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	})
-
-	// Start server with detailed error logging
-	log.Printf("Server starting on :%s", port)
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
-		log.Fatalf("Server failed to start: %v", err)
+	log.Println("Server starting on :8080")
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		log.Fatalf("Server failed: %v", err)
 	}
 }
+
+
