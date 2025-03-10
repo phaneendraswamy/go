@@ -146,7 +146,7 @@ func standardizeToAetna(inNetworkMap map[string]interface{}, rootHashID, root, r
 		var providerGroupIDs []interface{}
 		if pgids, ok := rateMap["provider_references"].([]interface{}); ok {
 			providerGroupIDs = pgids
-	) else if pgid, ok := rateMap["provider_references"]; ok {
+		} else if pgid, ok := rateMap["provider_references"]; ok {
 			providerGroupIDs = []interface{}{pgid}
 		}
 
@@ -821,15 +821,19 @@ var htmlTemplate = `
 `
 
 func main() {
-	// Use PORT environment variable from Railway, default to 8080 if not set
+	// Get PORT from environment, default to 8080 if not set
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080" // Default for local testing
-		log.Println("PORT environment variable not set, using default :8080")
+		log.Println("Warning: PORT environment variable not set, using default :8080")
 	} else {
 		log.Println("Using PORT from environment: " + port)
 	}
 
+	// Log all environment variables for debugging
+	log.Println("Environment variables:", os.Environ())
+
+	// Set up HTTP handlers
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		tmpl, err := template.New("index").Parse(htmlTemplate)
 		if err != nil {
@@ -873,6 +877,12 @@ func main() {
 			Total:   len(results),
 			Message: fmt.Sprintf("Displaying up to 100 entries per billing code, total %d entries", len(results)),
 		})
+	})
+
+	// Add a health check endpoint
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
 	})
 
 	// Start server with detailed error logging
