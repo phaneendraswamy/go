@@ -146,7 +146,7 @@ func standardizeToAetna(inNetworkMap map[string]interface{}, rootHashID, root, r
 		var providerGroupIDs []interface{}
 		if pgids, ok := rateMap["provider_references"].([]interface{}); ok {
 			providerGroupIDs = pgids
-		} else if pgid, ok := rateMap["provider_references"]; ok {
+	) else if pgid, ok := rateMap["provider_references"]; ok {
 			providerGroupIDs = []interface{}{pgid}
 		}
 
@@ -821,6 +821,15 @@ var htmlTemplate = `
 `
 
 func main() {
+	// Use PORT environment variable from Railway, default to 8080 if not set
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080" // Default for local testing
+		log.Println("PORT environment variable not set, using default :8080")
+	} else {
+		log.Println("Using PORT from environment: " + port)
+	}
+
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		tmpl, err := template.New("index").Parse(htmlTemplate)
 		if err != nil {
@@ -866,13 +875,9 @@ func main() {
 		})
 	})
 
-	// Use the PORT environment variable for Render
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080" // Default for local testing
-	}
-	log.Println("Server starting on :" + port)
+	// Start server with detailed error logging
+	log.Printf("Server starting on :%s", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
-		log.Fatalf("Server failed: %v", err)
+		log.Fatalf("Server failed to start: %v", err)
 	}
 }
