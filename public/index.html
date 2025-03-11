@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title> MRF VIEWER </title>
+    <style>
+        #loading-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        #loading-bar-container {
+            width: 300px;
+            background: #ddd;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        #loading-bar {
+            width: 0%;
+            height: 20px;
+            background: #4CAF50;
+            transition: width 0.1s linear;
+        }
+        #loading-text {
+            color: white;
+            font-family: Arial, sans-serif;
+            margin-top: 10px;
+            font-size: 16px;
+        }
+        #download-btn {
+            padding: 8px 16px;
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-family: Arial, sans-serif;
+            margin-top: 10px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container" style="max-width: 1200px; margin: 0 auto; position: relative;">
+        <h1 style="font-family: Arial, sans-serif;">MRF VIEWER </h1>
+        <form id="url-form">
+            <input type="text" id="url-input" placeholder="Enter URL" required style="width: 60%; padding: 8px; margin-right: 10px; font-family: Arial, sans-serif;">
+            <button type="submit" id="process-btn" style="padding: 8px 16px; background-color: #4CAF50; color: white; border: none; cursor: pointer; font-family: Arial, sans-serif;">Process</button>
+        </form>
+        <p id="message" style="margin-top: 10px; color: #333; font-family: Arial, sans-serif;"></p>
+        <button id="download-btn" onclick="downloadCSV()">Download as CSV</button>
+        <div id="table-container">
+            <table id="data-table" style="margin-top: 20px; width: 100%; border-collapse: collapse; overflow-x: auto; display: block; font-family: Arial, sans-serif;"></table>
+        </div>
+        <div class="pagination" id="pagination" style="margin-top: 20px;"></div>
+    </div>
+
+    <div id="loading-overlay">
+        <div style="text-align: center;">
+            <div id="loading-bar-container">
+                <div id="loading-bar"></div>
+            </div>
+            <div id="loading-text">Loading: 0%</div>
+        </div>
+    </div>
+
+    <script>
+        let allData = [];
+        let currentPage = 1;
+        const rowsPerPage = 100;
+        let filters = {
+            NPIs: new Set(),
+            InNetworkName: new Set(),
+            BillingCode: new Set(),
+            Description: new Set(),
+            NegotiatedRate: new Set(),
+            NegotiatedType: new Set()
+        };
+
+        function applyFilters(data) {
+            return data.filter(row => {
+                const npiString = Array.isArray(row.NPIs) ? row.NPIs.join(';') : String(row.NPIs);
+                const rateString = String(row.NegotiatedRate);
+                return (
+                    (filters.NPIs.size === 0 || filters.NPIs.has(npiString)) &&
+                    (filters.InNetworkName.size === 0 || filters.InNetworkName.has(row.InNetworkName)) &&
+                    (filters.BillingCode.size === 0 || filters.BillingCode.has(row.BillingCode)) &&
+                    (filters.Description.size === 0 || filters.Description.has(row.Description)) &&
+                    (filters.NegotiatedRate.size === 0 || filters.NegotiatedRate.has(rateString)) &&
+                    (filters.NegotiatedType.size === 0 || filters.NegotiatedType.has(row.NegotiatedType))
+                );
+            });
+        }
+
+        function displayTable(data, page = 1) {
+            const table = document.getElementById('data-table');
+            table.innerHTML = '';
+            const downloadBtn = document.getElementById('download-btn');
+
+            const filteredData = applyFilters(data);
+            if (filteredData.length === 0) {
+                document.getElementById('message').textContent = 'No data matches the current filters.';
+                downloadBtn.style.display = 'none';
+                return;
+            }
+
+            downloadBtn.style.display = 'block';
+
+            const start = (page - 1) * rowsPerPage;
+            const end = Math.min(start + rowsPerPage, filteredData.length);
+            const paginatedData = filteredData.slice(start, end);
+
+            const headers = [
+                'ReportingEntityName', 'ReportingEntityType', 'LastUpdatedOn', 'Version', 'RootHashID',
+                'ProviderGroupID', 'ProviderHashID', 'NPIs', 'TINType', 'TINValue', 'InNetworkName',
+                'NegotiationArrangement', 'BillingCodeType', 'BillingCodeTypeVersion', 'BillingCode',
+                'Description', 'NegotiatedRate', 'ServiceCodes', 'NegotiatedType', 'ExpirationDate',
+                'BillingClass', 'BillingCodeModifiers', 'AdditionalInfo'
+            ];
+            const filterableColumns = ['NPIs', 'InNetworkName', 'BillingCode', 'Description', 'NegotiatedRate', 'NegotiatedType'];
+
+            const thead = document.createElement('thead');
+            const headerRow = document.createElement('tr');
+            headers.forEach(header => {
+                const th = document.createElement('th');
+                th.textContent = header;
+                th.style.border = '1px solid #ddd';
+                th.style.padding = '8px';
+                th.style.textAlign = 'left';
+                th.style.maxWidth = '200px';
+                th.style.overflow = 'hidden';
+                th.style.textOverflow = 'ellipsis';
+                th.style.whiteSpace = 'nowrap';
+                th.style.backgroundColor = '#f2f2f2';
+                th.style.position = 'relative';
+                if (filterableColumns.includes(header)) {
+                    const filterBtn = document.createElement('button');
+                    filterBtn.textContent = '▼';
+                    filterBtn.style.marginLeft = '5px';
+                    filterBtn.style.padding = '2px 5px';
+                    filterBtn.style.cursor = 'pointer';
+                    filterBtn.onclick = (e) => toggleFilterDropdown(e, header, filteredData);
+                    th.appendChild(filterBtn);
+                }
+                headerRow.appendChild(th);
+            });
+            thead.appendChild(headerRow);
+            table.appendChild(thead);
+
+            const tbody = document.createElement('tbody');
+            paginatedData.forEach((row, index) => {
+                const tr = document.createElement('tr');
+                if (index % 2 === 0) {
+                    tr.style.backgroundColor = '#f9f9f9';
+                }
+                headers.forEach(header => {
+                    const td = document.createElement('td');
+                    const value = row[header];
+                    td.textContent = Array.isArray(value) ? value.join(';') : (value !== undefined ? value : '');
+                    td.style.border = '1px solid #ddd';
+                    td.style.padding = '8px';
+                    td.style.textAlign = 'left';
+                    td.style.maxWidth = '200px';
+                    td.style.overflow = 'hidden';
+                    td.style.textOverflow = 'ellipsis';
+                    td.style.whiteSpace = 'nowrap';
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+            table.appendChild(tbody);
+
+            updatePagination(filteredData.length, page);
+        }
+
+        function toggleFilterDropdown(event, column, data) {
+            const existingDropdown = document.querySelector('.filter-dropdown');
+            if (existingDropdown) existingDropdown.remove();
+
+            const uniqueValues = new Set(data.map(row => 
+                Array.isArray(row[column]) ? row[column].join(';') : String(row[column])
+            ));
+            const dropdown = document.createElement('div');
+            dropdown.className = 'filter-dropdown';
+            dropdown.style.position = 'fixed';
+            dropdown.style.background = 'white';
+            dropdown.style.border = '2px solid #ddd';
+            dropdown.style.padding = '20px';
+            dropdown.style.zIndex = '1000';
+            dropdown.style.minWidth = '400px';
+            dropdown.style.maxWidth = '500px';
+            dropdown.style.maxHeight = '600px';
+            dropdown.style.overflowY = 'auto';
+            dropdown.style.fontSize = '18px';
+            dropdown.style.boxShadow = '0 4px 8px rgba(0,0,0,0.2)';
+            dropdown.style.borderRadius = '8px';
+
+            const buttonRect = event.target.getBoundingClientRect();
+            dropdown.style.left = buttonRect.left + 'px';
+            dropdown.style.top = (buttonRect.bottom + window.scrollY) + 'px';
+
+            const dropdownRect = dropdown.getBoundingClientRect();
+            if (dropdownRect.right > window.innerWidth) {
+                dropdown.style.left = (window.innerWidth - dropdownRect.width) + 'px';
+            }
+            if (dropdownRect.bottom > window.innerHeight) {
+                dropdown.style.top = (buttonRect.top + window.scrollY - dropdownRect.height) + 'px';
+            }
+
+            uniqueValues.forEach(value => {
+                const label = document.createElement('label');
+                label.style.display = 'block';
+                label.style.marginBottom = '15px';
+                label.style.lineHeight = '1.5';
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.checked = filters[column].has(value);
+                checkbox.style.marginRight = '15px';
+                checkbox.style.transform = 'scale(1.2)';
+                checkbox.onchange = () => {
+                    if (checkbox.checked) filters[column].add(value);
+                    else filters[column].delete(value);
+                    currentPage = 1;
+                    displayTable(allData, currentPage);
+                };
+                label.appendChild(checkbox);
+                label.appendChild(document.createTextNode(" " + value));
+                dropdown.appendChild(label);
+            });
+
+            document.body.appendChild(dropdown);
+            event.stopPropagation();
+            document.addEventListener('click', closeDropdown);
+        }
+
+        function closeDropdown(event) {
+            const dropdown = document.querySelector('.filter-dropdown');
+            if (dropdown && !dropdown.contains(event.target)) {
+                dropdown.remove();
+                document.removeEventListener('click', closeDropdown);
+            }
+        }
+
+        function updatePagination(totalRows, page) {
+            const pagination = document.getElementById('pagination');
+            pagination.innerHTML = '';
+
+            const totalPages = Math.ceil(totalRows / rowsPerPage);
+            currentPage = Math.min(page, totalPages) || 1;
+
+            const prevBtn = document.createElement('button');
+            prevBtn.textContent = 'Previous';
+            prevBtn.disabled = currentPage === 1;
+            prevBtn.style.padding = '8px 16px';
+            prevBtn.style.backgroundColor = currentPage === 1 ? '#cccccc' : '#4CAF50';
+            prevBtn.style.color = 'white';
+            prevBtn.style.border = 'none';
+            prevBtn.style.cursor = currentPage === 1 ? 'not-allowed' : 'pointer';
+            prevBtn.style.margin = '0 5px';
+            prevBtn.onclick = () => displayTable(allData, currentPage - 1);
+            pagination.appendChild(prevBtn);
+
+            for (let i = 1; i <= totalPages; i++) {
+                const btn = document.createElement('button');
+                btn.textContent = i;
+                btn.style.padding = '8px 16px';
+                btn.style.backgroundColor = i === currentPage ? '#4CAF50' : '#f2f2f2';
+                btn.style.color = i === currentPage ? 'white' : '#333';
+                btn.style.border = 'none';
+                btn.style.cursor = 'pointer';
+                btn.style.margin = '0 5px';
+                btn.onclick = () => displayTable(allData, i);
+                pagination.appendChild(btn);
+            }
+
+            const nextBtn = document.createElement('button');
+            nextBtn.textContent = 'Next';
+            nextBtn.disabled = currentPage === totalPages;
+            nextBtn.style.padding = '8px 16px';
+            nextBtn.style.backgroundColor = currentPage === totalPages ? '#cccccc' : '#4CAF50';
+            nextBtn.style.color = 'white';
+            nextBtn.style.border = 'none';
+            nextBtn.style.cursor = currentPage === totalPages ? 'not-allowed' : 'pointer';
+            nextBtn.style.margin = '0 5px';
+            nextBtn.onclick = () => displayTable(allData, currentPage + 1);
+            pagination.appendChild(nextBtn);
+        }
+
+        function showLoading() {
+            const overlay = document.getElementById('loading-overlay');
+            const bar = document.getElementById('loading-bar');
+            const text = document.getElementById('loading-text');
+            overlay.style.display = 'flex';
+            bar.style.width = '0%';
+            text.textContent = 'Loading: 0%';
+
+            let progress = 0;
+            const interval = setInterval(() => {
+                if (progress < 90) {
+                    progress += 1;
+                    bar.style.width = progress + '%';
+                    text.textContent = 'Loading: ' + progress + '%';
+                }
+            }, 50);
+
+            return () => {
+                clearInterval(interval);
+                bar.style.width = '100%';
+                text.textContent = 'Loading: 100%';
+                setTimeout(() => overlay.style.display = 'none', 300);
+            };
+        }
+
+        function downloadCSV() {
+            const headers = [
+                'ReportingEntityName', 'ReportingEntityType', 'LastUpdatedOn', 'Version', 'RootHashID',
+                'ProviderGroupID', 'ProviderHashID', 'NPIs', 'TINType', 'TINValue', 'InNetworkName',
+                'NegotiationArrangement', 'BillingCodeType', 'BillingCodeTypeVersion', 'BillingCode',
+                'Description', 'NegotiatedRate', 'ServiceCodes', 'NegotiatedType', 'ExpirationDate',
+                'BillingClass', 'BillingCodeModifiers', 'AdditionalInfo'
+            ];
+
+            const escapeCSV = (value) => {
+                if (value === undefined || value === null) return '';
+                const str = String(value);
+                if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+                    return '"' + str.replace(/"/g, '""') + '"';
+                }
+                return str;
+            };
+
+            let csvContent = headers.join(',') + '\n';
+            allData.forEach(row => {
+                const rowValues = headers.map(header => {
+                    const value = row[header];
+                    return Array.isArray(value) ? escapeCSV(value.join(';')) : escapeCSV(value);
+                });
+                csvContent += rowValues.join(',') + '\n';
+            });
+
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', 'healthcare_data.csv');
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        document.getElementById('url-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const url = document.getElementById('url-input').value;
+            const processBtn = document.getElementById('process-btn');
+            const message = document.getElementById('message');
+
+            processBtn.disabled = true;
+            processBtn.style.backgroundColor = '#cccccc';
+            processBtn.style.cursor = 'not-allowed';
+            processBtn.textContent = 'Processing...';
+            message.textContent = '';
+
+            const hideLoading = showLoading();
+
+            try {
+                const response = await fetch('/api/process', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
+                if (!response.ok) throw new Error('Network response was not ok');
+                const result = await response.json();
+                allData = result.data;
+                displayTable(allData, 1);
+                message.textContent = result.message;
+            } catch (error) {
+                message.textContent = 'Error: ' + error.message;
+            } finally {
+                hideLoading();
+                processBtn.disabled = false;
+                processBtn.style.backgroundColor = '#4CAF50';
+                processBtn.style.cursor = 'pointer';
+                processBtn.textContent = 'Process';
+            }
+        });
+    </script>
+</body>
+</html>
